@@ -397,23 +397,22 @@ def decode_dynamic(stream,output_buffer, member_number, block_idx):
 
     #See Section 3.2.7 of RFC 1951
 
-    def decode_print(s):
-        if print_block_codes:
-            print('            %s'%s)
-
     # Okay, here we go
 
     #First 14 bits: three size values (little endian)
 
     hlit = stream.read_bits(5) # ((number of LL codes) - 257)
     num_ll_codes = hlit + 257
-    decode_print("Number of LL codes: %d (HLIT = %d)"%(num_ll_codes, hlit))
+    compression_stats[member_number]["blocks"][block_idx]["hlit"] = hlit
+    compression_stats[member_number]["blocks"][block_idx]["num_ll_codes"] = num_ll_codes
     hdist = stream.read_bits(5) # ((number of dist codes) - 1)
     num_dist_codes = hdist + 1
-    decode_print("Number of dist codes: %d (HDIST = %d)"%(num_dist_codes, hdist))
+    compression_stats[member_number]["blocks"][block_idx]["hdist"] = hdist
+    compression_stats[member_number]["blocks"][block_idx]["num_dist_codes"] = num_dist_codes
     hclen = stream.read_bits(4) # ((number of code length codes) - 4)
     num_cl_codes = hclen + 4
-    decode_print("Number of code length (CL) codes: %d (HCLEN = %d)"%(num_cl_codes, hclen))
+    compression_stats[member_number]["blocks"][block_idx]["hclen"] = hclen
+    compression_stats[member_number]["blocks"][block_idx]["num_cl_codes"] = num_cl_codes
 
     #Next bits: num_cl_codes*3 bits (up to 19 3-bit CL code lengths)
     #The lengths are stored in a weird order:
@@ -422,15 +421,9 @@ def decode_dynamic(stream,output_buffer, member_number, block_idx):
     for idx in CL_code_length_encoding_order[0:num_cl_codes]:
         CL_code_lengths[idx] = stream.read_bits(3)
 
-
-    decode_print("CL code lengths (0 - 18): " + ' '.join(str(i) for i in CL_code_lengths))
+    compression_stats[member_number]["blocks"][block_idx]["CL_code_lengths"] = CL_code_lengths
     CL_codes = code_lengths_to_code_table(CL_code_lengths)
-    decode_print("CL codes:")
-    for i in range(len(CL_codes)):
-        length, encoded_bits = CL_codes[i]
-        if length == 0:
-            continue
-        decode_print("    %d: %s"%(i, binary_string_big_endian(encoded_bits, length)))
+    compression_stats[member_number]["blocks"][block_idx]["CL_codes"] = CL_codes
 
     #Next bits: (num_ll_codes + num_dist_codes) code lengths for the LL and distance codes
     #(both codes are encoded together, using the CL code)
@@ -463,7 +456,7 @@ def decode_dynamic(stream,output_buffer, member_number, block_idx):
             repeat_count = 3 + stream.read_bits(2)
             if last_symbol == -1:
                 raise DecodingException("Repeat code (16) used for first CL code value")
-            decode_print("Symbol 16 (repeat count %d, repeating %d)"%(repeat_count, last_symbol))
+            #decode_print("Symbol 16 (repeat count %d, repeating %d)"%(repeat_count, last_symbol))
             for i in range(repeat_count):
                 if codes_read >= num_ll_codes:
                     dist_code_lengths[codes_read-num_ll_codes] = last_symbol
@@ -474,7 +467,7 @@ def decode_dynamic(stream,output_buffer, member_number, block_idx):
         elif symbol == 17:
             # Repeat a zero length between 3 and 10 times based on a three bit value
             repeat_count = 3 + stream.read_bits(3)
-            decode_print("Symbol 17 (repeat count %d)"%(repeat_count))
+            #decode_print("Symbol 17 (repeat count %d)"%(repeat_count))
             for i in range(repeat_count):
                 if codes_read >= num_ll_codes:
                     dist_code_lengths[codes_read-num_ll_codes] = 0
@@ -485,7 +478,7 @@ def decode_dynamic(stream,output_buffer, member_number, block_idx):
         else: # symbol == 18
             # Repeat a zero length between 11 and 138 times based on a seven bit value
             repeat_count = 11 + stream.read_bits(7)
-            decode_print("Symbol 18 (repeat count %d)"%(repeat_count))
+            #decode_print("Symbol 18 (repeat count %d)"%(repeat_count))
             for i in range(repeat_count):
                 if codes_read >= num_ll_codes:
                     dist_code_lengths[codes_read-num_ll_codes] = 0
@@ -495,21 +488,10 @@ def decode_dynamic(stream,output_buffer, member_number, block_idx):
             last_symbol = 0
 
     ll_codes = code_lengths_to_code_table(ll_code_lengths)
-    decode_print("LL codes:")
-    for i in range(len(ll_codes)):
-        length, encoded_bits = ll_codes[i]
-        if length == 0:
-            continue
-        decode_print("    %d: %s"%(i, binary_string_big_endian(encoded_bits, length)))
+    compression_stats[member_number]["blocks"][block_idx]["ll_codes"] = ll_codes
 
     dist_codes = code_lengths_to_code_table(dist_code_lengths)
-    decode_print("dist codes:")
-    for i in range(len(dist_codes)):
-        length, encoded_bits = dist_codes[i]
-        if length == 0:
-            continue
-        decode_print("    %d: %s"%(i, binary_string_big_endian(encoded_bits, length)))
-
+    compression_stats[member_number]["blocks"][block_idx]["dist_codes"] = dist_codes
 
     ll_tree = build_huffman_tree(ll_codes)
     dist_tree = build_huffman_tree(dist_codes)
@@ -600,6 +582,10 @@ def print_stats():
         if print_gzip_headers:
             print('    %s'%s)
 
+    def decode_print(s):
+        if print_block_codes:
+            print('            %s'%s)
+
     for member_number in compression_stats:
         print("-- gzip member %d --"%member_number)
 
@@ -635,6 +621,41 @@ def print_stats():
                 print("        Decoding Block Type 01 (fixed codes):") if print_block_stats else None
             elif block_type == 2:
                 print("        Decoding Block Type 10 (dynamic codes):") if print_block_stats else None
+                hlit = compression_stats[member_number]["blocks"][block_idx]["hlit"]
+                num_ll_codes = compression_stats[member_number]["blocks"][block_idx]["num_ll_codes"]
+                decode_print("Number of LL codes: %d (HLIT = %d)"%(num_ll_codes, hlit))
+                hdist = compression_stats[member_number]["blocks"][block_idx]["hdist"]
+                num_dist_codes = compression_stats[member_number]["blocks"][block_idx]["num_dist_codes"]
+                decode_print("Number of dist codes: %d (HDIST = %d)"%(num_dist_codes, hdist))
+                hclen = compression_stats[member_number]["blocks"][block_idx]["hclen"]
+                num_cl_codes = compression_stats[member_number]["blocks"][block_idx]["num_cl_codes"]
+                decode_print("Number of code length (CL) codes: %d (HCLEN = %d)"%(num_cl_codes, hclen))
+
+                CL_code_lengths = compression_stats[member_number]["blocks"][block_idx]["CL_code_lengths"]
+                decode_print("CL code lengths (0 - 18): " + ' '.join(str(i) for i in CL_code_lengths))
+                CL_codes = compression_stats[member_number]["blocks"][block_idx]["CL_codes"]
+                decode_print("CL codes:")
+                for i in range(len(CL_codes)):
+                    length, encoded_bits = CL_codes[i]
+                    if length == 0:
+                        continue
+                    decode_print("    %d: %s"%(i, binary_string_big_endian(encoded_bits, length)))
+
+                ll_codes = compression_stats[member_number]["blocks"][block_idx]["ll_codes"]
+                decode_print("LL codes:")
+                for i in range(len(ll_codes)):
+                    length, encoded_bits = ll_codes[i]
+                    if length == 0:
+                        continue
+                    decode_print("    %d: %s"%(i, binary_string_big_endian(encoded_bits, length)))
+
+                dist_codes = compression_stats[member_number]["blocks"][block_idx]["dist_codes"]
+                decode_print("dist codes:")
+                for i in range(len(dist_codes)):
+                    length, encoded_bits = dist_codes[i]
+                    if length == 0:
+                        continue
+                    decode_print("    %d: %s"%(i, binary_string_big_endian(encoded_bits, length)))
 
         # Footer
         crc_code = compression_stats[member_number]["crc_code"]
