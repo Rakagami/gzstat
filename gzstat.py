@@ -422,9 +422,9 @@ def decode_dynamic(stream,output_buffer, member_number, block_idx):
     for idx in CL_code_length_encoding_order[0:num_cl_codes]:
         CL_code_lengths[idx] = stream.read_bits(3)
 
-    compression_stats[member_number]["blocks"][block_idx]["CL_code_lengths"] = CL_code_lengths
+    #compression_stats[member_number]["blocks"][block_idx]["CL_code_lengths"] = CL_code_lengths
     CL_codes = code_lengths_to_code_table(CL_code_lengths)
-    compression_stats[member_number]["blocks"][block_idx]["CL_codes"] = CL_codes
+    #compression_stats[member_number]["blocks"][block_idx]["CL_codes"] = CL_codes
 
     #Next bits: (num_ll_codes + num_dist_codes) code lengths for the LL and distance codes
     #(both codes are encoded together, using the CL code)
@@ -489,10 +489,10 @@ def decode_dynamic(stream,output_buffer, member_number, block_idx):
             last_symbol = 0
 
     ll_codes = code_lengths_to_code_table(ll_code_lengths)
-    compression_stats[member_number]["blocks"][block_idx]["ll_codes"] = ll_codes
+    #compression_stats[member_number]["blocks"][block_idx]["ll_codes"] = ll_codes
 
     dist_codes = code_lengths_to_code_table(dist_code_lengths)
-    compression_stats[member_number]["blocks"][block_idx]["dist_codes"] = dist_codes
+    #compression_stats[member_number]["blocks"][block_idx]["dist_codes"] = dist_codes
 
     ll_tree = build_huffman_tree(ll_codes)
     dist_tree = build_huffman_tree(dist_codes)
