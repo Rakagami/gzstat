@@ -1,5 +1,5 @@
 # gzstat.py
-# 
+#
 # Utility for analyzing the structure of .gz files.
 # For the most verbose output, use
 #   python gzstat.py --print-block-codes --decode-blocks < your_input_file.gz
@@ -19,12 +19,13 @@ import sys, collections, datetime, binascii
 import argparse
 
 
-
-
 print_gzip_headers = True
 print_block_stats = True
 print_block_codes = True
 decode_blocks = True
+
+
+compression_stats = {}
 
 
 # Dictionary of possible 8 bit "compression type values" in the gzip header
@@ -48,7 +49,7 @@ length_code_ranges = [
             [272,2,31,34],   [273,3,35,42],   [274,3,43,50],   [275,3,51,58],   [276,3,59,66],
             [277,4,67,82],   [278,4,83,98],   [279,4,99,114],  [280,4,115,130], [281,5,131,162], 
             [282,5,163,194], [283,5,195,226], [284,5,227,257], [285,0,258,258]
-    ] 
+    ]
 
 #Construct a lookup table mapping length codes to (num_bits,lower_bound) pairs
 length_codes = {}
@@ -82,6 +83,14 @@ def binary_string_big_endian(v, num_bits):
 
 
 
+enable_print_log = True
+def print_log(s, **kwargs):
+    if enable_print_log:
+        print(s, **kwargs)
+
+
+def print_error(s):
+    print(s, file=sys.stderr)
 
 
 
@@ -140,13 +149,13 @@ class BitStream:
 
     def read_uint16_big_endian(self):
         return (self.read_byte()<<8)|self.read_byte()
-    
+
     def read_uint16_little_endian(self):
         return self.read_byte()|(self.read_byte()<<8)
 
     def read_uint32_big_endian(self):
         return (self.read_byte()<<24)|(self.read_byte()<<16)|(self.read_byte()<<8)|self.read_byte()
-    
+
     def read_uint32_little_endian(self):
         return self.read_byte()|(self.read_byte()<<8)|(self.read_byte()<<16)|(self.read_byte()<<24)
 
@@ -169,7 +178,7 @@ class OutputLZBuffer:
         self.history.append(b)
         while len(self.history) > self.history_size:
             del self.history[0]
-        
+
     def write_lz77_length_distance(self, length, distance):
         # distance is 1 based relative to the history array
         # (which is nice since we use it as an offset from the end)
@@ -178,7 +187,7 @@ class OutputLZBuffer:
         for i in range(length):
             self.write_byte(self.history[len(self.history) - distance]) #Note that we do not need to increment the index we use (the sequence moves along as we add bytes)
 
-    
+
 
 class HuffmanTreeNode:
     def __init__(self, symbol=-1, left=None, right=None):
@@ -286,7 +295,7 @@ def decode_huffman(stream, output_buffer, ll_tree, dist_tree):
             if decode_blocks:
                 print("%16s%d extra distance bits: Offset %d. Total distance %d"%('',num_extra_bits,distance_offset, distance))
             output_buffer.write_lz77_length_distance(length,distance)
-            
+
         else:
             output_buffer.write_byte(symbol)
         node = ll_tree
@@ -310,7 +319,7 @@ def code_lengths_to_code_table(code_lengths):
     for bits in range(1, max_length+1):
         code = (code + length_counts[bits-1]) << 1
         next_code[bits] = code
-    
+
     # Step 3
     code_table = [(0,0)]*len(code_lengths)
     for n in range(len(code_lengths)):
@@ -333,19 +342,22 @@ def code_lengths_to_code_table(code_lengths):
 
 
 
-    
 
-def decode_uncompressed(stream, output_buffer):
+
+def decode_uncompressed(stream, output_buffer, member_number, block_idx):
+    global compression_stats
+
     # Type 00: Block is uncompressed data
     # Flush to a byte boundary (Type 00 only)
     stream.flush_to_byte()
     # Blocks of this type start with two 16 bit little endian values s and ns
     # (where s == ~ns) containing the size of the block and its one's complement
     # representation (for consistency checking, I guess)
-    block_len = stream.read_uint16_little_endian()
-    block_nlen = stream.read_uint16_little_endian()
-    print("    Decoding Block Type 00 (uncompressed):")
-    print("        LEN = %d (0x%04x), NLEN = %d (0x%04x)"%(block_len,block_len,block_nlen,block_nlen))
+    compression_stats[member_number]["blocks"][block_idx]["block_len"] = stream.read_uint16_little_endian()
+    compression_stats[member_number]["blocks"][block_idx]["block_nlen"] = stream.read_uint16_little_endian()
+
+    block_len = compression_stats[member_number]["blocks"][block_idx]["block_len"]
+
     if block_len != ((~block_nlen)&0xffff):
         raise DecodingException("Inconsistent block length values")
 
@@ -353,13 +365,12 @@ def decode_uncompressed(stream, output_buffer):
         b = stream.read_byte()
         output_buffer.write_byte(b)
 
-def decode_fixed(stream, output_buffer):
+def decode_fixed(stream, output_buffer, member_number, block_idx):
+    global compression_stats
+
     # Type 01: Block uses the built-in Huffman code to encode data
     # Code is given below as per RFC 1951
 
-    if print_block_stats:
-        print("        Decoding Block Type 01 (fixed codes):")
-    
     # Mapping of code values (0 - 287) to (num_bits, code_bits) pairs
     ll_code = [0]*288
     for i in range(0, 144):
@@ -381,19 +392,19 @@ def decode_fixed(stream, output_buffer):
 
     decode_huffman(stream, output_buffer, ll_tree, dist_tree)
 
-def decode_dynamic(stream,output_buffer):
+def decode_dynamic(stream,output_buffer, member_number, block_idx):
+    global compression_stats
+
     #See Section 3.2.7 of RFC 1951
-    
+
     def decode_print(s):
         if print_block_codes:
             print('            %s'%s)
-    
-    #Okay, here we go
-    if print_block_stats:
-        print("        Decoding Block Type 10 (dynamic codes):")
+
+    # Okay, here we go
 
     #First 14 bits: three size values (little endian)
-    
+
     hlit = stream.read_bits(5) # ((number of LL codes) - 257)
     num_ll_codes = hlit + 257
     decode_print("Number of LL codes: %d (HLIT = %d)"%(num_ll_codes, hlit))
@@ -410,7 +421,7 @@ def decode_dynamic(stream,output_buffer):
     CL_code_lengths = [0]*19
     for idx in CL_code_length_encoding_order[0:num_cl_codes]:
         CL_code_lengths[idx] = stream.read_bits(3)
-    
+
 
     decode_print("CL code lengths (0 - 18): " + ' '.join(str(i) for i in CL_code_lengths))
     CL_codes = code_lengths_to_code_table(CL_code_lengths)
@@ -505,38 +516,37 @@ def decode_dynamic(stream,output_buffer):
     decode_huffman(stream, output_buffer, ll_tree, dist_tree)
 
 
-def read_block(stream, output_buffer, block_idx):
+def read_block(stream, output_buffer, member_number, block_idx):
+    global compression_stats
+    compression_stats[member_number]["blocks"][block_idx] = {}
+
     #First bit: Last block flag (1 = last block)
     last_block = stream.read_bit()
     #Next two bits (as a 2-bit little endian integer) are the block type
     # 00 = uncompressed, 01 = fixed codes, 10 = dynamic codes, 11 = invalid/reserved
     block_type = stream.read_bits(2)
-    if print_block_stats:
-        print("    -- Block %d (last = %d) --"%(block_idx, last_block))
-    block_types = {0: 'uncompressed',1:'fixed codes',2:'dynamic codes',3:'invalid/reserved'}
-    if print_block_stats:
-        print("        Block type: %d (%s)"%(block_type, block_types[block_type]))
+
+    compression_stats[member_number]["blocks"][block_idx]["last_block"] = last_block
+    compression_stats[member_number]["blocks"][block_idx]["block_type"] = block_type
+
     if block_type == 3:
         raise DecodingException("Can't decode block type 11")
 
     if block_type == 0:
-        decode_uncompressed(stream, output_buffer)
+        decode_uncompressed(stream, output_buffer, member_number, block_idx)
     elif block_type == 1:
-        decode_fixed(stream, output_buffer)
+        decode_fixed(stream, output_buffer, member_number, block_idx)
     elif block_type == 2:
-        decode_dynamic(stream,output_buffer)
+        decode_dynamic(stream,output_buffer, member_number, block_idx)
 
     return not last_block
 
 def read_member(stream, member_number):
+    global compression_stats
 
     output_buffer = OutputLZBuffer(lambda b: None)
     # Read the gzip header
     # See http://www.onicos.com/staff/iz/formats/gzip.html for a concise description
-
-    def header_print(s):
-        if print_gzip_headers:
-            print('    %s'%s)
 
     # Magic number
     try:
@@ -549,43 +559,93 @@ def read_member(stream, member_number):
         #the error and quit.
         #(If end of stream is encountered inside of the block, however, let the exception
         # propagate, since it is a real error in that case)
-        return False 
-    print("-- gzip member %d --"%member_number)
-    compression_method = stream.read_byte()
-    header_print("Compression Method: %d (%s)"%(compression_method, compression_methods[compression_method]))
-    flags = stream.read_byte()
-    header_print("Flags: 0x%02x"%(flags))
-    mtime = stream.read_uint32_little_endian()
-    header_print("Modification time: 0x%08x (%s)"%(mtime, datetime.datetime.fromtimestamp(mtime).ctime()))
-    exflags = stream.read_byte()
-    header_print("Extra flags: 0x%02x"%(exflags))
-    ostype = stream.read_byte()
-    header_print("OS Type: %d"%ostype)
+        return False
+
+    compression_stats[member_number] = {}
+
+    compression_stats[member_number]["compression_method"] = stream.read_byte()
+    compression_stats[member_number]["flags"] = stream.read_byte()
+    compression_stats[member_number]["mtime"] = stream.read_uint32_little_endian()
+    compression_stats[member_number]["exflags"] = stream.read_byte()
+    compression_stats[member_number]["ostype"] = stream.read_byte()
 
     if not (print_block_stats or print_block_codes or decode_blocks):
         return True
-    if compression_method != 8:
-        print("Unable to read block written with compression method %d")
-        print("(even the gzip decoder only reads blocks with DEFLATE compression)")
+    if compression_stats[member_number]["compression_method"] != 8:
+        print_error("Unable to read block written with compression method %d")
+        print_error("(even the gzip decoder only reads blocks with DEFLATE compression)")
         return False
 
+    compression_stats[member_number]["blocks"] = {}
     block_idx = 0
-    while read_block(stream, output_buffer, block_idx):
+    while read_block(stream, output_buffer, member_number, block_idx):
         block_idx += 1
-    
+
     # Blocks can start and end at arbitrary bit locations, but the elements at the
     # end of the file (CRC and length) must be aligned on a byte boundary
     stream.flush_to_byte()
-    
-    crc_code = stream.read_uint32_little_endian()
-    header_print("Stored CRC32: 0x%08x"%crc_code)
-    total_decompressed_size = stream.read_uint32_little_endian()
-    header_print("Stored Decompressed size: %d"%total_decompressed_size)
 
-    header_print("Actual CRC32: 0x%08x"%(output_buffer.crc&0xffffffff))
-    header_print("Actual Decompressed Size: %d"%(output_buffer.bytes_written))
+    compression_stats[member_number]["crc_code"] = stream.read_uint32_little_endian()
+    compression_stats[member_number]["total_decompressed_size"] = stream.read_uint32_little_endian()
+    compression_stats[member_number]["actual_crc_code"] = (output_buffer.crc&0xffffffff)
+    compression_stats[member_number]["actual_total_decompressed_size"] = (output_buffer.bytes_written)
 
     return True
+
+
+def print_stats():
+    global compression_stats
+
+    def header_print(s):
+        if print_gzip_headers:
+            print('    %s'%s)
+
+    for member_number in compression_stats:
+        print("-- gzip member %d --"%member_number)
+
+        member_stat = compression_stats[member_number]
+
+        # Headers
+        compression_method = member_stat["compression_method"]
+        header_print("Compression Method: %d (%s)"%(compression_method, compression_methods[compression_method]))
+        flags = member_stat["flags"]
+        header_print("Flags: 0x%02x"%(flags))
+        mtime = member_stat["mtime"]
+        header_print("Modification time: 0x%08x (%s)"%(mtime, datetime.datetime.fromtimestamp(mtime).ctime()))
+        exflags = member_stat["exflags"]
+        header_print("Extra flags: 0x%02x"%(exflags))
+        ostype = member_stat["ostype"]
+        header_print("OS Type: %d"%ostype)
+
+        for block_idx in member_stat["blocks"]:
+            block_stat = member_stat["blocks"][block_idx]
+            if print_block_stats:
+                print("    -- Block %d (last = %d) --"%(block_idx, block_stat["last_block"]))
+            block_types = {0: 'uncompressed',1:'fixed codes',2:'dynamic codes',3:'invalid/reserved'}
+            if print_block_stats:
+                print("        Block type: %d (%s)"%(block_stat["block_type"], block_types[block_stat["block_type"]]))
+
+            block_type = block_stat["block_type"]
+            if block_type == 0:
+                block_len = block_stat["block_len"]
+                block_nlen = block_stat["block_nlen"]
+                print("    Decoding Block Type 00 (uncompressed):")
+                print("        LEN = %d (0x%04x), NLEN = %d (0x%04x)"%(block_len,block_len,block_nlen,block_nlen))
+            elif block_type == 1:
+                print("        Decoding Block Type 01 (fixed codes):") if print_block_stats else None
+            elif block_type == 2:
+                print("        Decoding Block Type 10 (dynamic codes):") if print_block_stats else None
+
+        # Footer
+        crc_code = compression_stats[member_number]["crc_code"]
+        header_print("Stored CRC32: 0x%08x"%crc_code)
+        total_decompressed_size = compression_stats[member_number]["total_decompressed_size"]
+        header_print("Stored Decompressed size: %d"%total_decompressed_size)
+
+        actual_crc_code = compression_stats[member_number]["actual_crc_code"]
+        actual_total_decompressed_size = compression_stats[member_number]["actual_total_decompressed_size"]
+        header_print("Actual CRC32: 0x%08x"%(actual_crc_code))
+        header_print("Actual Decompressed Size: %d"%(actual_total_decompressed_size))
 
 
 if __name__ == '__main__':
@@ -606,8 +666,10 @@ if __name__ == '__main__':
         member_number = 0
         while read_member(stream, member_number):
             member_number += 1
-        print("Read %d gzip members"%member_number)
+        print_log("Read %d gzip members"%member_number)
     except BitStream.EndOfStream:
-        print("Unexpected end of stream")
+        print_log("Unexpected end of stream", file=sys.stderr)
     except DecodingException as e:
-        print("Decoding exception: %s"%e)
+        print_log("Decoding exception: %s"%e, file=sys.stderr)
+
+    print_stats()
