@@ -17,6 +17,7 @@
 
 import sys, collections, datetime, binascii
 import argparse
+import json
 
 
 print_gzip_headers = True
@@ -675,22 +676,28 @@ if __name__ == '__main__':
     argument_parser.add_argument('--no-block-stats',action="store_true",help='Don\'t print block stats.')
     argument_parser.add_argument('--print-block-codes',action="store_true",help='Print code information for blocks of type 2.')
     argument_parser.add_argument('--decode-blocks',action="store_true",help='Print full decoding information for each block.')
+    argument_parser.add_argument('--print-json',action="store_true",help='Print stat information as json. Disables all other prints')
 
     args = argument_parser.parse_args()
     print_gzip_headers = not args.no_headers
     print_block_stats = not args.no_block_stats
     print_block_codes = args.print_block_codes
     decode_blocks = args.decode_blocks
+    print_json = args.print_json
 
     try:
         stream = BitStream(sys.stdin.buffer) # sys.stdin.buffer is a version of sys.stdin open in binary mode
         member_number = 0
         while read_member(stream, member_number):
             member_number += 1
-        print_log("Read %d gzip members"%member_number)
+        if not print_json:
+            print_log("Read %d gzip members"%member_number)
     except BitStream.EndOfStream:
         print_log("Unexpected end of stream", file=sys.stderr)
     except DecodingException as e:
         print_log("Decoding exception: %s"%e, file=sys.stderr)
 
-    print_stats()
+    if not print_json:
+        print_stats()
+    else:
+        print(json.dumps(compression_stats, indent=3))
