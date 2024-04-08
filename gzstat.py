@@ -429,9 +429,9 @@ def decode_dynamic(stream,output_buffer, member_number, block_idx):
     for idx in CL_code_length_encoding_order[0:num_cl_codes]:
         CL_code_lengths[idx] = stream.read_bits(3)
 
-    #compression_stats[member_number]["blocks"][block_idx]["CL_code_lengths"] = CL_code_lengths
+    compression_stats[member_number]["blocks"][block_idx]["CL_code_lengths"] = CL_code_lengths
     CL_codes = code_lengths_to_code_table(CL_code_lengths)
-    #compression_stats[member_number]["blocks"][block_idx]["CL_codes"] = CL_codes
+    compression_stats[member_number]["blocks"][block_idx]["CL_codes"] = CL_codes
 
     #Next bits: (num_ll_codes + num_dist_codes) code lengths for the LL and distance codes
     #(both codes are encoded together, using the CL code)
@@ -503,11 +503,11 @@ def decode_dynamic(stream,output_buffer, member_number, block_idx):
     compression_stats[member_number]["blocks"][block_idx]["ll_dist_code_len_bits"] = ll_dist_code_len_bits
 
     ll_codes = code_lengths_to_code_table(ll_code_lengths)
-    #compression_stats[member_number]["blocks"][block_idx]["ll_codes"] = ll_codes
+    compression_stats[member_number]["blocks"][block_idx]["ll_codes"] = ll_codes
     compression_stats[member_number]["blocks"][block_idx]["ll_end_of_block_bits"] = ll_codes[256][0]
 
     dist_codes = code_lengths_to_code_table(dist_code_lengths)
-    #compression_stats[member_number]["blocks"][block_idx]["dist_codes"] = dist_codes
+    compression_stats[member_number]["blocks"][block_idx]["dist_codes"] = dist_codes
 
     ll_tree = build_huffman_tree(ll_codes)
     dist_tree = build_huffman_tree(dist_codes)
@@ -539,6 +539,14 @@ def read_block(stream, output_buffer, member_number, block_idx):
 
     return not last_block
 
+def parse_flags(flag_byte):
+    FTEXT       = ((flag_byte >> 0) & 1) == 1
+    FHCRC       = ((flag_byte >> 1) & 1) == 1
+    FEXTRA      = ((flag_byte >> 2) & 1) == 1
+    FNAME       = ((flag_byte >> 3) & 1) == 1
+    FCOMMENT    = ((flag_byte >> 4) & 1) == 1
+    return FTEXT, FHCRC, FEXTRA, FNAME, FCOMMENT
+
 def read_member(stream, member_number):
     global compression_stats
 
@@ -566,6 +574,24 @@ def read_member(stream, member_number):
     compression_stats[member_number]["mtime"] = stream.read_uint32_little_endian()
     compression_stats[member_number]["exflags"] = stream.read_byte()
     compression_stats[member_number]["ostype"] = stream.read_byte()
+
+    FTEXT, FHCRC, FEXTRA, FNAME, FCOMMENT = parse_flags(compression_stats[member_number]["flags"])
+
+    if FTEXT:
+        raise RuntimeError("FTEXT not supported")
+    if FHCRC:
+        raise RuntimeError("FHCRC not supported")
+    if FEXTRA:
+        raise RuntimeError("FEXTRA not supported")
+    if FNAME:
+        fname = ""
+        b = stream.read_byte()
+        while b != 0:
+            fname += chr(b)
+            b = stream.read_byte()
+        compression_stats[member_number]["fname"] = fname
+    if FCOMMENT:
+        raise RuntimeError("FCOMMENT not supported")
 
     if not (print_block_stats or print_block_codes or decode_blocks):
         return True
