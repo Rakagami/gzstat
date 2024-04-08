@@ -687,7 +687,7 @@ def analyze_file(file, print_gzip_headers, print_block_stats, print_block_codes,
     return compression_stats
 
 
-def analyze_buffer(data_buffer, print_gzip_headers, print_block_stats, print_block_codes, decode_blocks):
+def analyze_buffer(data_buffer, print_gzip_headers = True, print_block_stats = True, print_block_codes = False, decode_blocks = False):
     file_mock = BufferFileMock(data_buffer)
     return analyze_file(file_mock, print_gzip_headers, print_block_stats, print_block_codes, decode_blocks)
 
