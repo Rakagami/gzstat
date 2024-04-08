@@ -20,12 +20,6 @@ import argparse
 import json
 
 
-print_gzip_headers = True
-print_block_stats = True
-print_block_codes = True
-decode_blocks = True
-
-
 compression_stats = {}
 
 
@@ -685,8 +679,6 @@ def analyze_file(file, print_gzip_headers, print_block_stats, print_block_codes,
         member_number = 0
         while read_member(stream, member_number):
             member_number += 1
-        if not print_json:
-            print_log("Read %d gzip members"%member_number)
     except BitStream.EndOfStream:
         print_log("Unexpected end of stream", file=sys.stderr)
     except DecodingException as e:
@@ -699,6 +691,13 @@ def analyze_buffer(data_buffer, print_gzip_headers, print_block_stats, print_blo
     file_mock = BufferFileMock(data_buffer)
     return analyze_file(file_mock, print_gzip_headers, print_block_stats, print_block_codes, decode_blocks)
 
+
+# Default values if `analyze_file` or `analyze_buffer` are used externally
+print_gzip_headers = True
+print_block_stats = True
+print_block_codes = False
+decode_blocks = False
+print_json = False
 
 if __name__ == '__main__':
     argument_parser = argparse.ArgumentParser()
