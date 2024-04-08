@@ -680,9 +680,9 @@ def analyze_file(file, print_gzip_headers, print_block_stats, print_block_codes,
         while read_member(stream, member_number):
             member_number += 1
     except BitStream.EndOfStream:
-        print_log("Unexpected end of stream", file=sys.stderr)
+        raise RuntimeError("Unexpected end of stream")
     except DecodingException as e:
-        print_log("Decoding exception: %s"%e, file=sys.stderr)
+        raise RuntimeError("Decoding exception: %s"%e)
 
     return compression_stats
 
