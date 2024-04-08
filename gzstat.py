@@ -685,7 +685,7 @@ def print_stats():
         header_print("Actual Decompressed Size: %d"%(actual_total_decompressed_size))
 
 
-def analyze_file(file, print_gzip_headers, print_block_stats, print_block_codes, decode_blocks):
+def analyze_file(file, print_gzip_headers = True, print_block_stats = True, print_block_codes = False, decode_blocks = False):
     try:
         stream = BitStream(file) # sys.stdin.buffer is a version of sys.stdin open in binary mode
         member_number = 0
