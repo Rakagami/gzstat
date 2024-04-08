@@ -138,8 +138,11 @@ class BitStream:
         self.total_bits_read += 1
         return (self.working_bytes[byte_idx]>>bit_idx)&1
     def flush_to_byte(self):
+        counter = 0
         while self.working_bits_read%8 != 0:
+            counter += 1
             self.read_bit()
+        return counter
 
     #Read a bit sequence into an int value, with the low order bits read first
     def read_bits(self,num_bits):
@@ -353,7 +356,8 @@ def decode_uncompressed(stream, output_buffer, member_number, block_idx):
 
     # Type 00: Block is uncompressed data
     # Flush to a byte boundary (Type 00 only)
-    stream.flush_to_byte()
+    padding = stream.flush_to_byte()
+    compression_stats[member_number]["blocks"][block_idx]["padding"] = padding
     # Blocks of this type start with two 16 bit little endian values s and ns
     # (where s == ~ns) containing the size of the block and its one's complement
     # representation (for consistency checking, I guess)
