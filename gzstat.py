@@ -504,6 +504,7 @@ def decode_dynamic(stream,output_buffer, member_number, block_idx):
 
     ll_codes = code_lengths_to_code_table(ll_code_lengths)
     #compression_stats[member_number]["blocks"][block_idx]["ll_codes"] = ll_codes
+    compression_stats[member_number]["blocks"][block_idx]["ll_end_of_block_bits"] = ll_codes[256][0]
 
     dist_codes = code_lengths_to_code_table(dist_code_lengths)
     #compression_stats[member_number]["blocks"][block_idx]["dist_codes"] = dist_codes
