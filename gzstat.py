@@ -105,8 +105,17 @@ def print_error(s):
 
 
 
+class BufferFileMock:
+    def __init__(self, data_buffer):
+        self.data_buffer = data_buffer
+        self.read_pointer = 0
 
-
+    def read(self, buffer_size):
+        if self.read_pointer >= len(self.data_buffer):
+            return b''
+        slice = self.data_buffer[self.read_pointer:self.read_pointer + buffer_size]
+        self.read_pointer += buffer_size
+        return slice
 
 class DecodingException(Exception):
     pass
@@ -670,6 +679,27 @@ def print_stats():
         header_print("Actual Decompressed Size: %d"%(actual_total_decompressed_size))
 
 
+def analyze_file(file, print_gzip_headers, print_block_stats, print_block_codes, decode_blocks):
+    try:
+        stream = BitStream(file) # sys.stdin.buffer is a version of sys.stdin open in binary mode
+        member_number = 0
+        while read_member(stream, member_number):
+            member_number += 1
+        if not print_json:
+            print_log("Read %d gzip members"%member_number)
+    except BitStream.EndOfStream:
+        print_log("Unexpected end of stream", file=sys.stderr)
+    except DecodingException as e:
+        print_log("Decoding exception: %s"%e, file=sys.stderr)
+
+    return compression_stats
+
+
+def analyze_buffer(data_buffer, print_gzip_headers, print_block_stats, print_block_codes, decode_blocks):
+    file_mock = BufferFileMock(data_buffer)
+    return analyze_file(file_mock, print_gzip_headers, print_block_stats, print_block_codes, decode_blocks)
+
+
 if __name__ == '__main__':
     argument_parser = argparse.ArgumentParser()
     argument_parser.add_argument('--no-headers',action="store_true",help='Don\'t print gzip headers.')
@@ -685,17 +715,7 @@ if __name__ == '__main__':
     decode_blocks = args.decode_blocks
     print_json = args.print_json
 
-    try:
-        stream = BitStream(sys.stdin.buffer) # sys.stdin.buffer is a version of sys.stdin open in binary mode
-        member_number = 0
-        while read_member(stream, member_number):
-            member_number += 1
-        if not print_json:
-            print_log("Read %d gzip members"%member_number)
-    except BitStream.EndOfStream:
-        print_log("Unexpected end of stream", file=sys.stderr)
-    except DecodingException as e:
-        print_log("Decoding exception: %s"%e, file=sys.stderr)
+    analyze_file(sys.stdin.buffer, print_gzip_headers, print_block_stats, print_block_codes, decode_blocks)
 
     if not print_json:
         print_stats()
