@@ -443,8 +443,10 @@ def decode_dynamic(stream,output_buffer, member_number, block_idx):
     node = CL_tree_root
     codes_read = 0
     last_symbol = -1
+    ll_dist_code_len_bits = 0
     while codes_read < num_ll_codes + num_dist_codes:
         b = stream.read_bit()
+        ll_dist_code_len_bits += 1
         node = node.left if b == 0 else node.right
         if node.symbol == -1:
             continue
@@ -462,6 +464,7 @@ def decode_dynamic(stream,output_buffer, member_number, block_idx):
         elif symbol == 16:
             # Repeat the previous symbol between 3 and 6 times based on a two bit value
             repeat_count = 3 + stream.read_bits(2)
+            ll_dist_code_len_bits += 2
             if last_symbol == -1:
                 raise DecodingException("Repeat code (16) used for first CL code value")
             #decode_print("Symbol 16 (repeat count %d, repeating %d)"%(repeat_count, last_symbol))
@@ -475,6 +478,7 @@ def decode_dynamic(stream,output_buffer, member_number, block_idx):
         elif symbol == 17:
             # Repeat a zero length between 3 and 10 times based on a three bit value
             repeat_count = 3 + stream.read_bits(3)
+            ll_dist_code_len_bits += 3
             #decode_print("Symbol 17 (repeat count %d)"%(repeat_count))
             for i in range(repeat_count):
                 if codes_read >= num_ll_codes:
@@ -486,6 +490,7 @@ def decode_dynamic(stream,output_buffer, member_number, block_idx):
         else: # symbol == 18
             # Repeat a zero length between 11 and 138 times based on a seven bit value
             repeat_count = 11 + stream.read_bits(7)
+            ll_dist_code_len_bits += 7
             #decode_print("Symbol 18 (repeat count %d)"%(repeat_count))
             for i in range(repeat_count):
                 if codes_read >= num_ll_codes:
@@ -494,6 +499,8 @@ def decode_dynamic(stream,output_buffer, member_number, block_idx):
                     ll_code_lengths[codes_read] = 0
                 codes_read += 1
             last_symbol = 0
+
+    compression_stats[member_number]["blocks"][block_idx]["ll_dist_code_len_bits"] = ll_dist_code_len_bits
 
     ll_codes = code_lengths_to_code_table(ll_code_lengths)
     #compression_stats[member_number]["blocks"][block_idx]["ll_codes"] = ll_codes
