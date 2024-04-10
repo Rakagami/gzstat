@@ -365,6 +365,7 @@ def decode_uncompressed(stream, output_buffer, member_number, block_idx):
     compression_stats[member_number]["blocks"][block_idx]["block_nlen"] = stream.read_uint16_little_endian()
 
     block_len = compression_stats[member_number]["blocks"][block_idx]["block_len"]
+    block_nlen = compression_stats[member_number]["blocks"][block_idx]["block_nlen"]
 
     if block_len != ((~block_nlen)&0xffff):
         raise DecodingException("Inconsistent block length values")
